@@ -1,5 +1,8 @@
 import os
 import ssl
+import random
+import smtplib
+from email.mime.text import MIMEText
 import streamlit as st
 import pandas as pd
 import xmlrpc.client
@@ -11,23 +14,68 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 st.set_page_config(page_title="ERP Kỹ Thuật HCM - Siêu Tốc", page_icon="⚡", layout="wide")
 
-# Tối ưu giao diện Sidebar & chỉnh độ rộng Sidebar
+# ================= 🔒 BẢO MẬT ĐĂNG NHẬP BẰNG OTP =================
+if 'authenticated' not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔒 ĐĂNG NHẬP HỆ THỐNG ERP HCM")
+    user_email = st.text_input("Nhập email công ty của bạn (@sieutoc.com):")
+    
+    col_send, col_verify = st.columns([1, 1])
+    
+    with col_send:
+        if st.button("📧 Gửi mã xác thực OTP"):
+            if not user_email.strip().lower().endswith("@sieutoc.com"):
+                st.error("❌ Chỉ tài khoản email có đuôi @sieutoc.com mới có quyền truy cập!")
+            else:
+                otp = str(random.randint(100000, 999999))
+                st.session_state.otp_code = otp
+                st.session_state.target_email = user_email
+                
+                try:
+                    smtp_user = st.secrets["SMTP_EMAIL"]
+                    smtp_pass = st.secrets["SMTP_PASSWORD"]
+                    
+                    msg = MIMEText(f"Mã xác thực đăng nhập Dashboard ERP của bạn là: {otp}\nMã có hiệu lực trong phiên hiện tại.")
+                    msg['Subject'] = "[BẢO MẬT] Mã OTP Đăng Nhập Dashboard ERP"
+                    msg['From'] = smtp_user
+                    msg['To'] = user_email
+                    
+                    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+                        server.login(smtp_user, smtp_pass)
+                        server.sendmail(smtp_user, user_email, msg.as_string())
+                    st.success("✅ Đã gửi mã OTP! Vui lòng kiểm tra email.")
+                except Exception as e:
+                    st.error(f"Lỗi gửi email: {e}")
+
+    if 'otp_code' in st.session_state:
+        input_otp = st.text_input("Nhập mã OTP 6 số đã nhận trong email:", type="password")
+        if st.button("🔑 Xác nhận Đăng Nhập"):
+            if input_otp.strip() == st.session_state.otp_code:
+                st.session_state.authenticated = True
+                st.success("Đăng nhập thành công!")
+                st.rerun()
+            else:
+                st.error("❌ Mã OTP không chính xác, vui lòng kiểm tra lại!")
+
+    st.stop()  # Chặn không tải nội dung bên dưới nếu chưa xác thực
+
+# ================= ⚡ CHƯƠNG TRÌNH CHÍNH DASHBOARD =================
 st.markdown("""
     <style>
-    [data-testid="stSidebar"] {
-        min-width: 320px !important;
-    }
-    div[data-testid="stCheckbox"] {
-        margin-bottom: -10px !important;
-    }
+    [data-testid="stSidebar"] { min-width: 320px !important; }
+    div[data-testid="stCheckbox"] { margin-bottom: -10px !important; }
     </style>
 """, unsafe_allow_html=True)
 
 load_dotenv()
-URL = os.getenv("ERP_URL")
-DB = os.getenv("ERP_DB")
-USER = os.getenv("ERP_USER")
-PASSWORD = os.getenv("ERP_PASSWORD")
+
+# Ưu tiên lấy từ Secrets trên Streamlit Cloud, nếu không có mới lấy từ .env
+URL = st.secrets.get("ERP_URL", os.getenv("ERP_URL", ""))
+DB = st.secrets.get("ERP_DB", os.getenv("ERP_DB", ""))
+USER = st.secrets.get("ERP_USER", os.getenv("ERP_USER", ""))
+PASSWORD = st.secrets.get("ERP_PASSWORD", os.getenv("ERP_PASSWORD", ""))
 
 DANH_SACH_KT_HCM = [
     'Kỹ thuật - Anh Tài',
@@ -52,25 +100,13 @@ def load_all_data():
         models = xmlrpc.client.ServerProxy(f"{clean_url}/xmlrpc/2/object")
         
         fields_dvtc = ['create_date', 'x_studio_nguoi_thuc_hien', 'x_studio_san_pham', 'x_studio_so_luong', 'x_thanh_tien', 'x_studio_point']
-        records_dvtc = models.execute_kw(
-            DB, uid, PASSWORD, 
-            'x_dich_vu_ky_thuat_line', 'search_read', 
-            [[]], {'fields': fields_dvtc, 'limit': 2000, 'order': 'create_date desc'}
-        )
+        records_dvtc = models.execute_kw(DB, uid, PASSWORD, 'x_dich_vu_ky_thuat_line', 'search_read', [[]], {'fields': fields_dvtc, 'limit': 2000, 'order': 'create_date desc'})
         
         fields_pos = ['date_order', 'user_id', 'name', 'amount_total']
-        records_pos = models.execute_kw(
-            DB, uid, PASSWORD, 
-            'pos.order', 'search_read', 
-            [[]], {'fields': fields_pos, 'limit': 2000, 'order': 'date_order desc'}
-        )
+        records_pos = models.execute_kw(DB, uid, PASSWORD, 'pos.order', 'search_read', [[]], {'fields': fields_pos, 'limit': 2000, 'order': 'date_order desc'})
 
         fields_ticket = ['create_date', 'user_id', 'name', 'stage_id', 'team_id']
-        records_ticket = models.execute_kw(
-            DB, uid, PASSWORD, 
-            'helpdesk.ticket', 'search_read', 
-            [[]], {'fields': fields_ticket, 'limit': 2000, 'order': 'create_date desc'}
-        )
+        records_ticket = models.execute_kw(DB, uid, PASSWORD, 'helpdesk.ticket', 'search_read', [[]], {'fields': fields_ticket, 'limit': 2000, 'order': 'create_date desc'})
         
         return (records_dvtc, records_pos, records_ticket), None
     except Exception as e:
@@ -136,35 +172,26 @@ elif data:
         df_giao_hang = df_ticket_all[df_ticket_all['Đội'].str.contains('Giao hàng', case=False, na=False)].copy()
         if not df_giao_hang.empty:
             def build_delivery_status(row):
-                if row['Nhân viên'] == 'Chưa phân công' or not row['Nhân viên']:
+                nv = str(row.get('Nhân viên', '')).strip()
+                if nv == 'Chưa phân công' or not nv or nv.lower() == 'nan':
                     return '⚪ Chưa phân công'
-                
-                # Chuyển về chữ thường để bắt biến thể dễ nhất
-                stage = str(row['Giai đoạn']).strip().lower()
-                
-                # Bao vây toàn bộ biến thể Hủy (Tiếng Việt có dấu, không dấu, Tiếng Anh)
-                if any(kw in stage for kw in ['hủy', 'huỷ', 'huy', 'cancel', 'thất bại', 'bất thành', 'từ chối']):
+                stage = str(row.get('Giai đoạn', '')).strip().lower()
+                if any(kw in stage for kw in ['hủy', 'huỷ', 'huy', 'cancel']):
                     return '🔴 Hủy / Bất thành'
-                
-                # Bao vây biến thể Thành công
                 if any(kw in stage for kw in ['thành công', 'hoàn thành', 'done', 'success']):
                     return '🟢 Thành công'
-                
                 return '🟡 Đang xử lý'
             
             df_giao_hang['Trạng thái giao hàng'] = df_giao_hang.apply(build_delivery_status, axis=1)
 
-    # ================= SIDEBAR BỘ LỌC =================
+    # SIDEBAR
     st.sidebar.header("🔍 Cấu hình Bộ lọc HCM")
-    
     nhom_dv_list = ["Tất cả"] + sorted(df['Nhóm dịch vụ'].unique().tolist()) if not df.empty else ["Tất cả"]
     selected_nhom = st.sidebar.selectbox("Phân loại Dịch vụ:", nhom_dv_list)
     
     st.sidebar.markdown("---")
     st.sidebar.markdown("**Nhân Viên Kỹ Thuật:**")
-    
     all_checked = st.sidebar.checkbox("Chọn tất cả", value=True)
-    
     selected_nvs = []
     for nv in sorted(DANH_SACH_KT_HCM):
         display_name = nv.replace('Kỹ thuật - ', 'KT – ')
@@ -172,7 +199,6 @@ elif data:
             selected_nvs.append(nv)
 
     st.sidebar.markdown("---")
-
     min_date = df['Thời gian'].min().date() if not df.empty else pd.Timestamp.now().date()
     max_date = df['Thời gian'].max().date() if not df.empty else pd.Timestamp.now().date()
     date_range = st.sidebar.date_input("Khoảng thời gian:", value=(min_date, max_date), min_value=min_date, max_value=max_date)
@@ -200,10 +226,8 @@ elif data:
     col1, col2, col3, col4 = st.columns(4)
     col1.metric("1. Điểm DVTC", round(df_filtered['Điểm kỹ thuật'].sum(), 2) if not df_filtered.empty else 0)
     col2.metric("2. Doanh thu DVTP", f"{df_filtered['Thành tiền'].sum():,.0f} VNĐ" if not df_filtered.empty else "0 VNĐ")
-    
     htkt_pending = len(df_htkt_filtered[df_htkt_filtered['Trạng thái hỗ trợ'] == 'Đang chờ xử lý']) if not df_htkt_filtered.empty else 0
     col3.metric("3. Vé Hỗ Trợ Đang Chờ 🔴", htkt_pending)
-
     gh_pending = len(df_gh_filtered[df_gh_filtered['Trạng thái giao hàng'] == '🟡 Đang xử lý']) if not df_gh_filtered.empty else 0
     gh_unassigned = len(df_gh_filtered[df_gh_filtered['Trạng thái giao hàng'] == '⚪ Chưa phân công']) if not df_gh_filtered.empty else 0
     col4.metric("4. Đơn Giao Đang Chờ 🟡", gh_pending, delta=f"{gh_unassigned} chưa gán", delta_color="inverse")
@@ -221,8 +245,6 @@ elif data:
                     fig_point = px.bar(dvtc_chart, y='Nhân viên', x='Điểm kỹ thuật', orientation='h', title='🏆 Điểm Kỹ Thuật (DVTC)', color_discrete_sequence=['#00CC96'])
                     fig_point.update_layout(height=300)
                     st.plotly_chart(fig_point, use_container_width=True)
-                
-                st.markdown("##### 📋 Chi tiết Dịch vụ tiêu chuẩn (DVTC)")
                 st.dataframe(df_filtered[df_filtered['Nhóm dịch vụ'] == 'DVTC (Tiêu chuẩn)'][['Thời gian', 'Nhân viên', 'Dịch vụ', 'Số lượng', 'Điểm kỹ thuật']], width='stretch')
 
         if selected_nhom in ["Tất cả", "DVTP (Thu phí)"]:
@@ -232,12 +254,9 @@ elif data:
                     fig_rev = px.bar(dvtp_chart, y='Nhân viên', x='Thành tiền', orientation='h', title='💰 Doanh Thu (DVTP)', color_discrete_sequence=['#EF553B'])
                     fig_rev.update_layout(height=300)
                     st.plotly_chart(fig_rev, use_container_width=True)
-                
-                st.markdown("##### 📋 Chi tiết Dịch vụ thu phí (DVTP)")
                 st.dataframe(df_filtered[df_filtered['Nhóm dịch vụ'] == 'DVTP (Thu phí)'][['Thời gian', 'Nhân viên', 'Dịch vụ', 'Thành tiền']].style.format({'Thành tiền': '{:,.0f} VNĐ'}), width='stretch')
 
     st.markdown("---")
-
     st.subheader("🛠️ Trụ 3: Quản Lý Vé Hỗ Trợ Chưa Xử Lý")
     if not df_htkt_filtered.empty:
         df_htkt_pending = df_htkt_filtered[df_htkt_filtered['Trạng thái hỗ trợ'] == 'Đang chờ xử lý']
@@ -247,11 +266,8 @@ elif data:
             fig_htkt.update_layout(height=320, barmode='stack')
             st.plotly_chart(fig_htkt, use_container_width=True)
             st.dataframe(df_htkt_pending[['Thời gian', 'name', 'Nhân viên', 'Giai đoạn']].rename(columns={'name': 'Tiêu đề vé'}), width='stretch')
-        else:
-            st.success("🎉 Không có vé hỗ trợ kỹ thuật nào bị tồn đọng.")
 
     st.markdown("---")
-
     st.subheader("🚚 Trụ 4: Quản Lý Tiến Độ Đội Giao Hàng")
     if not df_gh_filtered.empty:
         gh_chart_data = df_gh_filtered.groupby(['Nhân viên', 'Trạng thái giao hàng']).size().reset_index(name='Số đơn')
