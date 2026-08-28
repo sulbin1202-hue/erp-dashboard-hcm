@@ -34,6 +34,7 @@ DANH_SACH_KT_HCM = [
     'Kỹ thuật - Huỳnh Văn Nhật',
     'Kỹ thuật - Nguyên Huy',
     'Kỹ thuật - Trần Nhật Phú',
+    'Kỹ thuật - Viết Dương',
     'Kỹ thuật - Võ Xuân Tùng'
 ]
 
@@ -161,7 +162,7 @@ elif data:
     today_vn = now_vn.date()
     default_start = today_vn.replace(day=1)
 
-    # Bộ chọn ngày mở tự do (Không bị khóa cứng ngày max)
+    # Bộ chọn ngày mở tự do
     date_range = st.sidebar.date_input(
         "Khoảng thời gian:", 
         value=(default_start, today_vn)
