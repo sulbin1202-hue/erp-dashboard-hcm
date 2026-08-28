@@ -14,7 +14,8 @@ st.set_page_config(page_title="ERP Kỹ Thuật HCM - Siêu Tốc", page_icon="�
 # ================= ⚡ CHƯƠNG TRÌNH CHÍNH DASHBOARD =================
 st.markdown("""
     <style>
-    [data-testid="stSidebar"] { min-width: 320px !important; }
+    /* Chỉ cố định 320px khi Sidebar đang MỞ */
+    [data-testid="stSidebar"][aria-expanded="true"] { min-width: 320px !important; }
     div[data-testid="stCheckbox"] { margin-bottom: -10px !important; }
     </style>
 """, unsafe_allow_html=True)
@@ -181,7 +182,7 @@ elif data:
     if len(date_range) == 2 and not df_htkt_filtered.empty:
         df_htkt_filtered = df_htkt_filtered[(df_htkt_filtered['Thời gian'].dt.date >= date_range[0]) & (df_htkt_filtered['Thời gian'].dt.date <= date_range[1])]
 
-    df_gh_filtered = df_giao_hang[df_giao_hang['Nhân viên'].isin(selected_nvs + ['Chưa phân công'])] if not df_giao_hang.empty and selected_nvs else pd.DataFrame()
+    df_gh_filtered = df_giao_hang[df_giao_hang['Nhân viên'].isin(selected_nvs + ['Chưa phân công'])] if not df_gh_filtered.empty and selected_nvs else pd.DataFrame()
     if len(date_range) == 2 and not df_gh_filtered.empty:
         df_gh_filtered = df_gh_filtered[(df_gh_filtered['Thời gian'].dt.date >= date_range[0]) & (df_gh_filtered['Thời gian'].dt.date <= date_range[1])]
 
