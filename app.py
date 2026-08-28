@@ -13,54 +13,6 @@ from dotenv import load_dotenv
 ssl._create_default_https_context = ssl._create_unverified_context
 
 st.set_page_config(page_title="ERP Kỹ Thuật HCM - Siêu Tốc", page_icon="⚡", layout="wide")
-
-# ================= 🔒 BẢO MẬT ĐĂNG NHẬP BẰNG OTP =================
-if 'authenticated' not in st.session_state:
-    st.session_state.authenticated = False
-
-if not st.session_state.authenticated:
-    st.title("🔒 ĐĂNG NHẬP HỆ THỐNG ERP HCM")
-    user_email = st.text_input("Nhập email công ty của bạn (@sieutoc.com):")
-    
-    col_send, col_verify = st.columns([1, 1])
-    
-    with col_send:
-        if st.button("📧 Gửi mã xác thực OTP"):
-            if not user_email.strip().lower().endswith("@sieutoc.com"):
-                st.error("❌ Chỉ tài khoản email có đuôi @sieutoc.com mới có quyền truy cập!")
-            else:
-                otp = str(random.randint(100000, 999999))
-                st.session_state.otp_code = otp
-                st.session_state.target_email = user_email
-                
-                try:
-                    smtp_user = st.secrets["SMTP_EMAIL"]
-                    smtp_pass = st.secrets["SMTP_PASSWORD"]
-                    
-                    msg = MIMEText(f"Mã xác thực đăng nhập Dashboard ERP của bạn là: {otp}\nMã có hiệu lực trong phiên hiện tại.")
-                    msg['Subject'] = "[BẢO MẬT] Mã OTP Đăng Nhập Dashboard ERP"
-                    msg['From'] = smtp_user
-                    msg['To'] = user_email
-                    
-                    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
-                        server.login(smtp_user, smtp_pass)
-                        server.sendmail(smtp_user, user_email, msg.as_string())
-                    st.success("✅ Đã gửi mã OTP! Vui lòng kiểm tra email.")
-                except Exception as e:
-                    st.error(f"Lỗi gửi email: {e}")
-
-    if 'otp_code' in st.session_state:
-        input_otp = st.text_input("Nhập mã OTP 6 số đã nhận trong email:", type="password")
-        if st.button("🔑 Xác nhận Đăng Nhập"):
-            if input_otp.strip() == st.session_state.otp_code:
-                st.session_state.authenticated = True
-                st.success("Đăng nhập thành công!")
-                st.rerun()
-            else:
-                st.error("❌ Mã OTP không chính xác, vui lòng kiểm tra lại!")
-
-    st.stop()  # Chặn không tải nội dung bên dưới nếu chưa xác thực
-
 # ================= ⚡ CHƯƠNG TRÌNH CHÍNH DASHBOARD =================
 st.markdown("""
     <style>
