@@ -1,8 +1,5 @@
 import os
 import ssl
-import random
-import smtplib
-from email.mime.text import MIMEText
 import streamlit as st
 import pandas as pd
 import xmlrpc.client
@@ -13,6 +10,7 @@ from dotenv import load_dotenv
 ssl._create_default_https_context = ssl._create_unverified_context
 
 st.set_page_config(page_title="ERP Kỹ Thuật HCM - Siêu Tốc", page_icon="⚡", layout="wide")
+
 # ================= ⚡ CHƯƠNG TRÌNH CHÍNH DASHBOARD =================
 st.markdown("""
     <style>
@@ -41,24 +39,27 @@ DANH_SACH_KT_HCM = [
 
 st.title("⚡ DASHBOARD TỨ TRỤ: KỸ THUẬT HCM")
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=300)  # Giảm cache xuống 5 phút để dữ liệu cập nhật nhanh hơn
 def load_all_data():
     try:
         clean_url = URL.strip('/')
         common = xmlrpc.client.ServerProxy(f"{clean_url}/xmlrpc/2/common")
         uid = common.authenticate(DB, USER, PASSWORD, {})
         if not uid: return None, "Xác thực Odoo thất bại!"
-        
         models = xmlrpc.client.ServerProxy(f"{clean_url}/xmlrpc/2/object")
         
+        # 1. Trích xuất DVTC
         fields_dvtc = ['create_date', 'x_studio_nguoi_thuc_hien', 'x_studio_san_pham', 'x_studio_so_luong', 'x_thanh_tien', 'x_studio_point']
-        records_dvtc = models.execute_kw(DB, uid, PASSWORD, 'x_dich_vu_ky_thuat_line', 'search_read', [[]], {'fields': fields_dvtc, 'limit': 2000, 'order': 'create_date desc'})
+        records_dvtc = models.execute_kw(DB, uid, PASSWORD, 'x_dich_vu_ky_thuat_line', 'search_read', [[]], {'fields': fields_dvtc, 'limit': 3000, 'order': 'create_date desc'})
         
-        fields_pos = ['date_order', 'user_id', 'name', 'amount_total']
-        records_pos = models.execute_kw(DB, uid, PASSWORD, 'pos.order', 'search_read', [[]], {'fields': fields_pos, 'limit': 2000, 'order': 'date_order desc'})
+        # 2. Trích xuất DVTP (POS) - Đồng bộ lọc các đơn đã thanh toán/hoàn tất giống ERP
+        fields_pos = ['date_order', 'user_id', 'name', 'amount_total', 'state']
+        domain_pos = [['state', 'in', ['paid', 'done', 'invoiced']]]
+        records_pos = models.execute_kw(DB, uid, PASSWORD, 'pos.order', 'search_read', [domain_pos], {'fields': fields_pos, 'limit': 3000, 'order': 'date_order desc'})
 
+        # 3. Trích xuất Ticket (Hỗ trợ kỹ thuật & Giao hàng)
         fields_ticket = ['create_date', 'user_id', 'name', 'stage_id', 'team_id']
-        records_ticket = models.execute_kw(DB, uid, PASSWORD, 'helpdesk.ticket', 'search_read', [[]], {'fields': fields_ticket, 'limit': 2000, 'order': 'create_date desc'})
+        records_ticket = models.execute_kw(DB, uid, PASSWORD, 'helpdesk.ticket', 'search_read', [[]], {'fields': fields_ticket, 'limit': 3000, 'order': 'create_date desc'})
         
         return (records_dvtc, records_pos, records_ticket), None
     except Exception as e:
@@ -72,6 +73,7 @@ if error:
 elif data:
     records_dvtc, records_pos, records_ticket = data
     
+    # Xử lý DVTC
     df_dvtc = pd.DataFrame(records_dvtc)
     if not df_dvtc.empty:
         df_dvtc['Thời gian'] = pd.to_datetime(df_dvtc['create_date']) + pd.Timedelta(hours=7)
@@ -82,6 +84,7 @@ elif data:
         df_dvtc['Thành tiền'] = 0.0
         df_dvtc['Nhóm dịch vụ'] = 'DVTC (Tiêu chuẩn)'
     
+    # Xử lý POS / DVTP
     df_pos = pd.DataFrame(records_pos)
     if not df_pos.empty:
         df_pos['Thời gian'] = pd.to_datetime(df_pos['date_order']) + pd.Timedelta(hours=7)
@@ -104,6 +107,7 @@ elif data:
     else:
         df = pd.DataFrame(columns=cols)
 
+    # Xử lý Tickets
     df_ticket_all = pd.DataFrame(records_ticket)
     df_htkt = pd.DataFrame()
     df_giao_hang = pd.DataFrame()
@@ -151,14 +155,24 @@ elif data:
             selected_nvs.append(nv)
 
     st.sidebar.markdown("---")
-    min_date = df['Thời gian'].min().date() if not df.empty else pd.Timestamp.now().date()
-    max_date = df['Thời gian'].max().date() if not df.empty else pd.Timestamp.now().date()
-    date_range = st.sidebar.date_input("Khoảng thời gian:", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+    
+    # Ép múi giờ chuẩn Việt Nam (UTC+7)
+    now_vn = pd.Timestamp.now(tz='UTC') + pd.Timedelta(hours=7)
+    today_vn = now_vn.date()
+    default_start = today_vn.replace(day=1)
 
+    # Bộ chọn ngày mở tự do (Không bị khóa cứng ngày max)
+    date_range = st.sidebar.date_input(
+        "Khoảng thời gian:", 
+        value=(default_start, today_vn)
+    )
+
+    # Lọc theo Nhân viên & Nhóm dịch vụ
     df_filtered = df[df['Nhân viên'].isin(selected_nvs)] if selected_nvs and not df.empty else pd.DataFrame(columns=df.columns)
     if selected_nhom != "Tất cả" and not df_filtered.empty: 
         df_filtered = df_filtered[df_filtered['Nhóm dịch vụ'] == selected_nhom]
 
+    # Lọc theo Khoảng thời gian
     if len(date_range) == 2 and not df_filtered.empty:
         df_filtered = df_filtered[(df_filtered['Thời gian'].dt.date >= date_range[0]) & (df_filtered['Thời gian'].dt.date <= date_range[1])]
 
