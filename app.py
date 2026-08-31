@@ -11,10 +11,8 @@ ssl._create_default_https_context = ssl._create_unverified_context
 
 st.set_page_config(page_title="ERP Kỹ Thuật HCM - Siêu Tốc", page_icon="⚡", layout="wide")
 
-# ================= ⚡ CHƯƠNG TRÌNH CHÍNH DASHBOARD =================
 st.markdown("""
     <style>
-    /* Chỉ cố định 320px khi Sidebar đang MỞ */
     [data-testid="stSidebar"][aria-expanded="true"] { min-width: 320px !important; }
     div[data-testid="stCheckbox"] { margin-bottom: -10px !important; }
     </style>
@@ -22,7 +20,6 @@ st.markdown("""
 
 load_dotenv()
 
-# Ưu tiên lấy từ Secrets trên Streamlit Cloud, nếu không có mới lấy từ .env
 URL = st.secrets.get("ERP_URL", os.getenv("ERP_URL", ""))
 DB = st.secrets.get("ERP_DB", os.getenv("ERP_DB", ""))
 USER = st.secrets.get("ERP_USER", os.getenv("ERP_USER", ""))
@@ -41,7 +38,7 @@ DANH_SACH_KT_HCM = [
 
 st.title("⚡ DASHBOARD TỨ TRỤ: KỸ THUẬT HCM")
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=60)
 def load_all_data(start_date_str, end_date_str):
     try:
         clean_url = URL.strip('/')
@@ -54,30 +51,36 @@ def load_all_data(start_date_str, end_date_str):
         start_utc = (pd.to_datetime(start_date_str) - pd.Timedelta(hours=7)).strftime('%Y-%m-%d %H:%M:%S')
         end_utc = (pd.to_datetime(end_date_str) + pd.Timedelta(days=1) - pd.Timedelta(hours=7)).strftime('%Y-%m-%d %H:%M:%S')
 
-        # Lấy danh sách ID người dùng của KT HCM
-        user_ids = models.execute_kw(DB, uid, PASSWORD, 'res.users', 'search', [[['name', 'in', DANH_SACH_KT_HCM]]])
-
-        # 1. Trích xuất DVTC theo thời gian
+        # 1. Trích xuất DVTC theo thời gian (Ép Odoo sắp xếp đơn mới nhất lên đầu)
         fields_dvtc = ['create_date', 'x_studio_nguoi_thuc_hien', 'x_studio_san_pham', 'x_studio_so_luong', 'x_thanh_tien', 'x_studio_point']
         domain_dvtc = [['create_date', '>=', start_utc], ['create_date', '<=', end_utc]]
-        records_dvtc = models.execute_kw(DB, uid, PASSWORD, 'x_dich_vu_ky_thuat_line', 'search_read', [domain_dvtc], {'fields': fields_dvtc, 'limit': 10000})
+        records_dvtc = models.execute_kw(
+            DB, uid, PASSWORD, 'x_dich_vu_ky_thuat_line', 'search_read', 
+            [domain_dvtc], 
+            {'fields': fields_dvtc, 'order': 'create_date desc', 'limit': 10000}
+        )
 
-        # 2. Trích xuất POS (DVTP) lọc ĐÚNG Nhân viên KT HCM & Thời gian từ Odoo
+        # 2. Trích xuất POS (DVTP): Lấy tất cả đơn trừ đơn Hủy, Ưu tiên lấy đơn MỚI NHẤT
         fields_pos = ['date_order', 'user_id', 'name', 'amount_total', 'state']
         domain_pos = [
-            ['state', 'in', ['paid', 'done', 'invoiced']],
+            ['state', '!=', 'cancel'],
             ['date_order', '>=', start_utc],
             ['date_order', '<=', end_utc]
         ]
-        if user_ids:
-            domain_pos.append(['user_id', 'in', user_ids])
+        records_pos = models.execute_kw(
+            DB, uid, PASSWORD, 'pos.order', 'search_read', 
+            [domain_pos], 
+            {'fields': fields_pos, 'order': 'date_order desc', 'limit': 10000}
+        )
 
-        records_pos = models.execute_kw(DB, uid, PASSWORD, 'pos.order', 'search_read', [domain_pos], {'fields': fields_pos, 'limit': 10000})
-
-        # 3. Trích xuất Ticket theo thời gian
+        # 3. Trích xuất Ticket theo thời gian (Đơn mới nhất lên đầu)
         fields_ticket = ['create_date', 'user_id', 'name', 'stage_id', 'team_id']
         domain_ticket = [['create_date', '>=', start_utc], ['create_date', '<=', end_utc]]
-        records_ticket = models.execute_kw(DB, uid, PASSWORD, 'helpdesk.ticket', 'search_read', [domain_ticket], {'fields': fields_ticket, 'limit': 10000})
+        records_ticket = models.execute_kw(
+            DB, uid, PASSWORD, 'helpdesk.ticket', 'search_read', 
+            [domain_ticket], 
+            {'fields': fields_ticket, 'order': 'create_date desc', 'limit': 10000}
+        )
 
         return (records_dvtc, records_pos, records_ticket), None
     except Exception as e:
